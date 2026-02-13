@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Subduction · Web Video</title>
+    <style>
+        :root {
+            color-scheme: only light;
+            font-family: "Avenir Next", "Segoe UI", sans-serif;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at 10% 20%, #fff9e8, #d8e8ff 55%, #cadfd7);
+        }
+    </style>
+</head>
+<body>
+    <script type="module">
+        import init from "./pkg/web_video.js";
+        await init();
+    </script>
+</body>
+</html>

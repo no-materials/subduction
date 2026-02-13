@@ -1,0 +1,17 @@
+[package]
+name = "subduction_backend_wayland"
+description = "Wayland backend for subduction (frame callbacks, wp_presentation)"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compositing", "wayland", "presentation-time"]
+categories = ["rendering::engine"]
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction_core = { workspace = true, features = ["std"] }

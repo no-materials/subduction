@@ -1,0 +1,17 @@
+[package]
+name = "subduction_sync_harness"
+description = "Reusable sync metrics and grading for Subduction web/macOS demos"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["timing", "sync", "metrics", "demo"]
+categories = ["rendering::engine"]
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction_core = { workspace = true }

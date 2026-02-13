@@ -1,0 +1,17 @@
+[package]
+name = "subduction_backend_windows"
+description = "Windows backend for subduction (DirectComposition, DXGI)"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compositing", "windows", "directcomposition", "dxgi"]
+categories = ["os::windows-apis", "rendering::engine"]
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction_core = { workspace = true, features = ["std"] }

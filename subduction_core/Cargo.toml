@@ -1,0 +1,24 @@
+[package]
+name = "subduction_core"
+description = "Core types and layer tree for timing-synchronized compositing"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compositing", "layer-tree", "no_std", "timing"]
+categories = ["no-std", "rendering::engine"]
+
+[features]
+default = []
+std = ["kurbo/std"]
+trace = []
+trace-rich = ["trace"]
+
+[lints]
+workspace = true
+
+[dependencies]
+kurbo = { workspace = true }
+understory_dirty = { workspace = true }

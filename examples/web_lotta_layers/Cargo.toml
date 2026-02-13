@@ -1,0 +1,31 @@
+[package]
+name = "web_lotta_layers"
+description = "Web stress-test: 1000+ animated DOM elements in grouped orbits"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+lotta_layers_common = { path = "../lotta_layers_common" }
+subduction_core = { workspace = true }
+subduction_backend_web = { path = "../../subduction_backend_web" }
+wasm-bindgen = { workspace = true }
+js-sys = "0.3"
+web-sys = { workspace = true, features = [
+    "CssStyleDeclaration",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "Location",
+    "Node",
+    "Window",
+] }

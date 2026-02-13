@@ -1,0 +1,42 @@
+[package]
+name = "web_video"
+description = "Web example: real video playback with code-driven controls and Subduction overlays"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction_core = { workspace = true }
+subduction_backend_web = { path = "../../subduction_backend_web" }
+subduction_sync_harness = { workspace = true }
+wasm-bindgen = { workspace = true }
+web-sys = { workspace = true, features = [
+    "AudioContext",
+    "AudioDestinationNode",
+    "AudioNode",
+    "AudioParam",
+    "CssStyleDeclaration",
+    "Document",
+    "Element",
+    "Event",
+    "EventTarget",
+    "GainNode",
+    "HtmlButtonElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlVideoElement",
+    "MouseEvent",
+    "Node",
+    "OscillatorNode",
+    "OscillatorType",
+    "Window",
+] }
