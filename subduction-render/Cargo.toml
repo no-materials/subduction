@@ -1,0 +1,21 @@
+[package]
+name = "subduction-render"
+description = "Render-plan definitions and damage tracking for subduction"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compositing", "render-plan", "damage-tracking", "no_std"]
+categories = ["no-std", "rendering::engine"]
+
+[features]
+default = []
+std = ["subduction-core/std"]
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction-core = { workspace = true }

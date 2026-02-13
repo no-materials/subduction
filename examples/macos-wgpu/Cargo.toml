@@ -1,0 +1,47 @@
+[package]
+name = "macos-wgpu"
+description = "macOS example: hybrid CALayer tree + wgpu-rendered content"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction-core = { workspace = true }
+subduction-backend-apple = { path = "../../subduction-backend-apple" }
+wgpu = "24"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "NSNotification",
+    "NSObject",
+    "NSString",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "NSApplication",
+    "NSGraphics",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSView",
+    "NSWindow",
+    "objc2-quartz-core",
+] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "CALayer",
+    "CAMetalLayer",
+    "objc2-core-foundation",
+    "objc2-core-graphics",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "CFCGTypes",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+    "CGColor",
+    "objc2",
+] }

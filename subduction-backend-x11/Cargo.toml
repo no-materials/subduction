@@ -1,0 +1,17 @@
+[package]
+name = "subduction-backend-x11"
+description = "X11 backend for subduction (Present extension, OML sync)"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compositing", "x11", "present-extension"]
+categories = ["rendering::engine"]
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction-core = { workspace = true, features = ["std"] }

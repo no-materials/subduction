@@ -1,0 +1,17 @@
+[package]
+name = "subduction-backend-android"
+description = "Android backend for subduction (Choreographer, Surface)"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compositing", "android", "choreographer"]
+categories = ["rendering::engine"]
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction-core = { workspace = true, features = ["std"] }

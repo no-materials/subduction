@@ -1,0 +1,16 @@
+[package]
+name = "trace-demo"
+description = "Simulated frame-loop tracing demo"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+subduction-core = { workspace = true, features = ["trace", "trace-rich"] }
+subduction-debug = { path = "../../subduction-debug" }
