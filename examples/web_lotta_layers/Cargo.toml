@@ -21,11 +21,11 @@ subduction_backend_web = { path = "../../subduction_backend_web" }
 wasm-bindgen = { workspace = true }
 js-sys = "0.3"
 web-sys = { workspace = true, features = [
-    "CssStyleDeclaration",
-    "Document",
-    "Element",
-    "HtmlElement",
-    "Location",
-    "Node",
-    "Window",
+  "CssStyleDeclaration",
+  "Document",
+  "Element",
+  "HtmlElement",
+  "Location",
+  "Node",
+  "Window",
 ] }

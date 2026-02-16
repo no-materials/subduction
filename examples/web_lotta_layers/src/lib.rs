@@ -49,8 +49,20 @@ const DEFAULT_LAYERS: usize = 1000;
 fn layer_color_css(index: usize) -> String {
     let hue = (index as f64 * 137.508) % 360.0;
     let [r, g, b] = lotta_layers_common::hsl_to_rgb(hue, 0.7, 0.6);
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "CSS color channels intentionally clamp to u8-like integer domain"
+    )]
     let ri = (r * 255.0) as u32;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "CSS color channels intentionally clamp to u8-like integer domain"
+    )]
     let gi = (g * 255.0) as u32;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "CSS color channels intentionally clamp to u8-like integer domain"
+    )]
     let bi = (b * 255.0) as u32;
     format!("rgba({ri},{gi},{bi},0.9)")
 }

@@ -18,5 +18,9 @@ kurbo = { workspace = true }
 subduction_core = { workspace = true }
 wasm-bindgen = { workspace = true }
 web-sys = { workspace = true, features = [
-    "CssStyleDeclaration", "Document", "Element", "HtmlElement", "Node",
+  "CssStyleDeclaration",
+  "Document",
+  "Element",
+  "HtmlElement",
+  "Node",
 ] }

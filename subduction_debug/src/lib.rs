@@ -10,8 +10,8 @@
 //! - [`pretty::PrettyPrintSink`] — human-readable one-line-per-event output.
 //! - [`recorder::RecorderSink`] — compact binary recording with
 //!   [`recorder::decode`] for playback.
-//! - [`chrome::ChromeTraceExporter`] — writes Chrome Trace Event Format JSON
-//!   from recorded bytes.
+//! - [`chrome::export`] — writes Chrome Trace Event Format JSON
+//!   from recorded recorder bytes.
 
 pub mod chrome;
 pub mod pretty;

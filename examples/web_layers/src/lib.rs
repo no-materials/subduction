@@ -24,6 +24,10 @@
     allow(dead_code, reason = "this crate only runs in the browser")
 )]
 #![expect(unsafe_code, reason = "js_sys::Float32Array::view requires unsafe")]
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "demo code intentionally narrows canvas dimensions and shader uniforms"
+)]
 
 extern crate alloc;
 
