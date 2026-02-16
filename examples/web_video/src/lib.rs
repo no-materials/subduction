@@ -113,7 +113,7 @@ fn reanchor_media_clock(clock: &mut AffineClock, timebase: Timebase, host: HostT
 }
 
 /// Entry point for the web-video demo.
-#[wasm_bindgen(start)]
+#[cfg_attr(all(target_arch = "wasm32", not(test)), wasm_bindgen(start))]
 pub fn main() -> Result<(), JsValue> {
     let document = web_sys::window()
         .expect("window")
