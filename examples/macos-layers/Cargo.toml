@@ -13,38 +13,40 @@ workspace = true
 
 [dependencies]
 subduction-core = { workspace = true, features = ["trace"] }
-subduction-backend-apple = { path = "../../subduction-backend-apple", features = ["appkit"] }
+subduction-backend-apple = { path = "../../subduction-backend-apple", features = [
+  "appkit",
+] }
 subduction-debug = { path = "../../subduction-debug" }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = [
-    "NSNotification",
-    "NSObject",
-    "NSString",
+  "NSNotification",
+  "NSObject",
+  "NSString",
 ] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
-    "NSApplication",
-    "NSButton",
-    "NSColor",
-    "NSControl",
-    "NSGraphics",
-    "NSProgressIndicator",
-    "NSResponder",
-    "NSRunningApplication",
-    "NSTextField",
-    "NSView",
-    "NSWindow",
-    "objc2-core-foundation",
-    "objc2-quartz-core",
+  "NSApplication",
+  "NSButton",
+  "NSColor",
+  "NSControl",
+  "NSGraphics",
+  "NSProgressIndicator",
+  "NSResponder",
+  "NSRunningApplication",
+  "NSTextField",
+  "NSView",
+  "NSWindow",
+  "objc2-core-foundation",
+  "objc2-quartz-core",
 ] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
-    "CALayer",
-    "objc2-core-foundation",
-    "objc2-core-graphics",
+  "CALayer",
+  "objc2-core-foundation",
+  "objc2-core-graphics",
 ] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = [
-    "CFCGTypes",
+  "CFCGTypes",
 ] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = [
-    "CGColor",
-    "objc2",
+  "CGColor",
+  "objc2",
 ] }

@@ -691,10 +691,10 @@ mod tests {
         }
 
         let mut sink = RecordingSink { ticks: Vec::new() };
-        let mut tracer = Tracer::new(&mut sink);
-        tracer.frame_tick(&sample_tick());
-        // Access sink after tracer is dropped.
-        drop(tracer);
+        {
+            let mut tracer = Tracer::new(&mut sink);
+            tracer.frame_tick(&sample_tick());
+        }
         assert_eq!(sink.ticks, &[42]);
     }
 }

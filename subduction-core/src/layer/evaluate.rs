@@ -16,7 +16,7 @@
 //!    rebuilt at the start of evaluation if needed).
 //!
 //! [`FrameChanges`] uses raw slot indices (`u32`) rather than [`LayerId`]
-//! handles so that backends can index directly into the store's SoA arrays
+//! handles so that backends can index directly into the store's `SoA` arrays
 //! via the `*_at()` accessors (e.g.
 //! [`world_transform_at`](super::LayerStore::world_transform_at)) without
 //! paying for generation checks on every access.

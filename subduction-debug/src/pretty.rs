@@ -4,7 +4,7 @@
 //! Human-readable trace output.
 //!
 //! [`PrettyPrintSink`] implements [`TraceSink`] and writes one line per event
-//! to a [`Write`](std::io::Write) destination (default: stderr). Timestamps
+//! to a [`Write`] destination (default: stderr). Timestamps
 //! are converted to microseconds using a [`Timebase`].
 
 use std::io::Write;
@@ -15,7 +15,7 @@ use subduction_core::trace::{
     PhaseEndEvent, PhaseKind, PresentFeedbackEvent, SubmitEvent, TraceSink,
 };
 
-/// Writes human-readable trace lines to a [`Write`](std::io::Write) destination.
+/// Writes human-readable trace lines to a [`Write`] destination.
 pub struct PrettyPrintSink<W: Write = Box<dyn Write>> {
     writer: W,
     timebase: Timebase,

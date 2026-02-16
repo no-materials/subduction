@@ -22,6 +22,10 @@ pub fn hsl_to_rgb(h: f64, s: f64, l: f64) -> [f64; 3] {
     let c = (1.0 - libm::fabs(2.0 * l - 1.0)) * s;
     let h_prime = h / 60.0;
     let x = c * (1.0 - libm::fabs(h_prime % 2.0 - 1.0));
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "h_prime is bounded to [0, 6) for hue in [0, 360)"
+    )]
     let (r1, g1, b1) = match h_prime as u32 {
         0 => (c, x, 0.0),
         1 => (x, c, 0.0),
@@ -62,6 +66,10 @@ pub fn animate_groups(
         store.set_transform(group_id, Transform3d::from_translation(gx, gy, 0.0));
 
         // Group opacity: pulse between 0.5–1.0.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "opacity values are intentionally quantized to f32"
+        )]
         let pulse = (0.5 + 0.5 * libm::sin(t * 0.8 + group_phase)) as f32;
         store.set_opacity(group_id, 0.5 + pulse * 0.5);
 

@@ -31,29 +31,34 @@ kurbo = { workspace = true }
 # Apple framework bindings (always required)
 objc2 = { version = "0.6", default-features = false, features = ["alloc"] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
-    "NSObject", "NSRunLoop", "NSObjCRuntime", "NSString",
+  "NSObject",
+  "NSRunLoop",
+  "NSObjCRuntime",
+  "NSString",
 ] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
-    "CALayer",
-    "CAMetalLayer",
-    "CATransaction",
-    "CATransform3D",
-    "objc2-core-foundation",
+  "CALayer",
+  "CAMetalLayer",
+  "CATransaction",
+  "CATransform3D",
+  "objc2-core-foundation",
 ] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFCGTypes"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+  "CFCGTypes",
+] }
 
 # cv-display-link feature deps (legacy macOS only)
 objc2-core-video = { version = "0.3", optional = true, default-features = false, features = [
-    "CVDisplayLink",
-    "CVBase",
-    "CVReturn",
-    "CVHostTime",
+  "CVDisplayLink",
+  "CVBase",
+  "CVReturn",
+  "CVHostTime",
 ] }
 dispatch2 = { version = "0.3", optional = true, default-features = false }
 
 # appkit feature deps
 objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = [
-    "NSResponder",
-    "NSView",
-    "objc2-core-foundation",
+  "NSResponder",
+  "NSView",
+  "objc2-core-foundation",
 ] }
