@@ -197,6 +197,10 @@ impl LayerStore {
 
     /// Adds `child` as the last child of `parent`.
     ///
+    /// Marks inherited channels for `child`'s subtree so world transform,
+    /// effective opacity, and effective hidden state are recomputed under the
+    /// new ancestry.
+    ///
     /// # Panics
     ///
     /// Panics if either handle is stale, or if `child` already has a parent.
@@ -230,11 +234,16 @@ impl LayerStore {
         let _ = self.dirty.add_dependency(c, p, dirty::TRANSFORM);
         let _ = self.dirty.add_dependency(c, p, dirty::OPACITY);
 
+        self.mark_subtree_inherited_dirty(c);
         self.traversal_dirty = true;
         self.dirty.mark(p, dirty::TOPOLOGY);
     }
 
     /// Removes `child` from its current parent.
+    ///
+    /// Marks inherited channels for `child`'s subtree so world transform,
+    /// effective opacity, and effective hidden state are recomputed after
+    /// detaching from the old ancestry.
     ///
     /// # Panics
     ///
@@ -251,6 +260,7 @@ impl LayerStore {
         self.dirty.remove_dependency(c, p, dirty::TRANSFORM);
         self.dirty.remove_dependency(c, p, dirty::OPACITY);
 
+        self.mark_subtree_inherited_dirty(c);
         self.traversal_dirty = true;
         self.dirty.mark(p, dirty::TOPOLOGY);
     }
@@ -258,6 +268,9 @@ impl LayerStore {
     /// Moves `child` to be a child of `new_parent`.
     ///
     /// If `child` already has a parent, it is removed first.
+    /// Marks inherited channels for `child`'s subtree so world transform,
+    /// effective opacity, and effective hidden state are recomputed under the
+    /// new ancestry.
     ///
     /// # Panics
     ///
@@ -297,6 +310,7 @@ impl LayerStore {
         let _ = self.dirty.add_dependency(c, p, dirty::TRANSFORM);
         let _ = self.dirty.add_dependency(c, p, dirty::OPACITY);
 
+        self.mark_subtree_inherited_dirty(c);
         self.traversal_dirty = true;
         self.dirty.mark(p, dirty::TOPOLOGY);
     }
@@ -618,6 +632,14 @@ impl LayerStore {
         self.parent[idx as usize] = INVALID;
         self.prev_sibling[idx as usize] = INVALID;
         self.next_sibling[idx as usize] = INVALID;
+    }
+
+    /// Marks the subtree rooted at `idx` dirty for inherited channels.
+    ///
+    /// `TRANSFORM` also carries effective hidden propagation.
+    fn mark_subtree_inherited_dirty(&mut self, idx: u32) {
+        self.dirty.mark_with(idx, dirty::TRANSFORM, &EagerPolicy);
+        self.dirty.mark_with(idx, dirty::OPACITY, &EagerPolicy);
     }
 }
 

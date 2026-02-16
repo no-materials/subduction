@@ -483,6 +483,133 @@ mod tests {
     }
 
     #[test]
+    fn topology_add_child_recomputes_inherited_properties_for_subtree() {
+        use crate::layer::LayerFlags;
+
+        let mut store = LayerStore::new();
+        let parent = store.create_layer();
+        let child = store.create_layer();
+        let grandchild = store.create_layer();
+        store.add_child(child, grandchild);
+        let _ = store.evaluate();
+
+        store.set_transform(parent, Transform3d::from_translation(10.0, 0.0, 0.0));
+        store.set_opacity(parent, 0.5);
+        store.set_flags(parent, LayerFlags { hidden: true });
+        let _ = store.evaluate();
+
+        store.add_child(parent, child);
+        let changes = store.evaluate();
+
+        assert!(changes.transforms.contains(&child.idx));
+        assert!(changes.transforms.contains(&grandchild.idx));
+        assert!(changes.opacities.contains(&child.idx));
+        assert!(changes.opacities.contains(&grandchild.idx));
+        assert!(changes.hidden.contains(&child.idx));
+        assert!(changes.hidden.contains(&grandchild.idx));
+
+        assert_eq!(
+            store.world_transform(child),
+            Transform3d::from_translation(10.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            store.world_transform(grandchild),
+            Transform3d::from_translation(10.0, 0.0, 0.0)
+        );
+
+        let eps = 1e-6;
+        assert!((store.effective_opacity(child) - 0.5).abs() < eps);
+        assert!((store.effective_opacity(grandchild) - 0.5).abs() < eps);
+        assert!(store.effective_hidden(child));
+        assert!(store.effective_hidden(grandchild));
+    }
+
+    #[test]
+    fn topology_remove_from_parent_recomputes_inherited_properties_for_subtree() {
+        use crate::layer::LayerFlags;
+
+        let mut store = LayerStore::new();
+        let parent = store.create_layer();
+        let child = store.create_layer();
+        let grandchild = store.create_layer();
+
+        store.add_child(parent, child);
+        store.add_child(child, grandchild);
+
+        store.set_transform(parent, Transform3d::from_translation(10.0, 0.0, 0.0));
+        store.set_opacity(parent, 0.5);
+        store.set_flags(parent, LayerFlags { hidden: true });
+        let _ = store.evaluate();
+
+        store.remove_from_parent(child);
+        let changes = store.evaluate();
+
+        assert!(changes.transforms.contains(&child.idx));
+        assert!(changes.transforms.contains(&grandchild.idx));
+        assert!(changes.opacities.contains(&child.idx));
+        assert!(changes.opacities.contains(&grandchild.idx));
+        assert!(changes.unhidden.contains(&child.idx));
+        assert!(changes.unhidden.contains(&grandchild.idx));
+
+        assert_eq!(store.world_transform(child), Transform3d::IDENTITY);
+        assert_eq!(store.world_transform(grandchild), Transform3d::IDENTITY);
+
+        let eps = 1e-6;
+        assert!((store.effective_opacity(child) - 1.0).abs() < eps);
+        assert!((store.effective_opacity(grandchild) - 1.0).abs() < eps);
+        assert!(!store.effective_hidden(child));
+        assert!(!store.effective_hidden(grandchild));
+    }
+
+    #[test]
+    fn topology_reparent_recomputes_inherited_properties_for_subtree() {
+        use crate::layer::LayerFlags;
+
+        let mut store = LayerStore::new();
+        let old_parent = store.create_layer();
+        let new_parent = store.create_layer();
+        let child = store.create_layer();
+        let grandchild = store.create_layer();
+
+        store.add_child(child, grandchild);
+        store.add_child(old_parent, child);
+
+        store.set_transform(old_parent, Transform3d::from_translation(10.0, 0.0, 0.0));
+        store.set_opacity(old_parent, 0.5);
+        store.set_flags(old_parent, LayerFlags { hidden: true });
+
+        store.set_transform(new_parent, Transform3d::from_translation(25.0, 0.0, 0.0));
+        store.set_opacity(new_parent, 0.25);
+        store.set_flags(new_parent, LayerFlags { hidden: false });
+        let _ = store.evaluate();
+
+        store.reparent(child, new_parent);
+        let changes = store.evaluate();
+
+        assert!(changes.transforms.contains(&child.idx));
+        assert!(changes.transforms.contains(&grandchild.idx));
+        assert!(changes.opacities.contains(&child.idx));
+        assert!(changes.opacities.contains(&grandchild.idx));
+        assert!(changes.unhidden.contains(&child.idx));
+        assert!(changes.unhidden.contains(&grandchild.idx));
+
+        assert_eq!(
+            store.world_transform(child),
+            Transform3d::from_translation(25.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            store.world_transform(grandchild),
+            Transform3d::from_translation(25.0, 0.0, 0.0)
+        );
+
+        let eps = 1e-6;
+        assert!((store.effective_opacity(child) - 0.25).abs() < eps);
+        assert!((store.effective_opacity(grandchild) - 0.25).abs() < eps);
+        assert!(!store.effective_hidden(child));
+        assert!(!store.effective_hidden(grandchild));
+    }
+
+    #[test]
     fn evaluate_into_reuses_buffer() {
         let mut store = LayerStore::new();
         let a = store.create_layer();
