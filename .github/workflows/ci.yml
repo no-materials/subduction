@@ -53,9 +53,6 @@ env:
     --exclude macos-layers
     --exclude macos-lotta-layers
     --exclude macos-wgpu
-    --exclude web-layers
-    --exclude web-video
-    --exclude web-lotta-layers
     --exclude trace-demo
   # List of packages that are macOS-only and must be excluded on non-macOS runners.
   RUST_MAC_ONLY_PKGS: >-

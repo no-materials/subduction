@@ -82,7 +82,7 @@ struct AnimState {
 }
 
 /// Entry point — called automatically by `wasm_bindgen(start)`.
-#[wasm_bindgen(start)]
+#[cfg_attr(all(target_arch = "wasm32", not(test)), wasm_bindgen(start))]
 pub fn main() -> Result<(), JsValue> {
     let window = web_sys::window().expect("no global window");
     let document = window.document().expect("no document");
