@@ -7,8 +7,6 @@
 //! layer tree on Apple platforms (macOS, iOS, tvOS, visionOS):
 //!
 //! - [`DisplayLink`]: Tick source (`CADisplayLink` or legacy `CVDisplayLink`)
-//! - [`CvDisplayLink`]: Explicit `CVDisplayLink` tick source (when the
-//!   `cv-display-link` feature is enabled)
 //! - [`LayerPresenter`]: `CALayer` tree presenter
 //! - [`MetalLayerPresenter`]: `CAMetalLayer` presenter
 //! - [`TickForwarder`] / [`TickSender`]: Tick forwarding for `CVDisplayLink`
@@ -44,8 +42,6 @@ pub use subduction_core::backend::Presenter;
 pub use ca_display_link::DisplayLink;
 #[cfg(all(feature = "cv-display-link", not(feature = "ca-display-link")))]
 pub use cv_display_link::DisplayLink;
-#[cfg(feature = "cv-display-link")]
-pub use cv_display_link::DisplayLink as CvDisplayLink;
 
 #[cfg(all(feature = "cv-display-link", not(feature = "ca-display-link")))]
 pub use cv_display_link::DisplayLinkError;
