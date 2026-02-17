@@ -687,7 +687,9 @@ fn setup_window(mtm: MainThreadMarker) {
     queue.write_buffer(&quad_vb, 0, bytemuck::cast_slice(&FULLSCREEN_QUAD));
 
     let vertex_buffers = [prism_vb, quad_vb.clone(), quad_vb];
-    let vertex_counts: [u32; 3] = [prism_verts.len() as u32, 6, 6];
+    let prism_vertex_count = u32::try_from(prism_verts.len())
+        .expect("prism vertex count must fit in u32 draw-call vertex count");
+    let vertex_counts: [u32; 3] = [prism_vertex_count, 6, 6];
 
     let mut gpu_layers: Vec<GpuLayerState> = Vec::with_capacity(3);
     // We must consume `surfaces` and `metal_layers` together.
@@ -792,6 +794,10 @@ fn on_tick(tick: FrameTick) {
         s.presenter.apply(&s.store, &changes);
 
         // --- Render wgpu content into GPU layers ---
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "Shader uniform intentionally narrows wall-clock seconds from f64 to f32"
+        )]
         let time_f32 = t as f32;
 
         for gpu in &s.gpu_layers {
@@ -870,6 +876,10 @@ fn animate_transforms(store: &mut LayerStore, sub_ids: &[LayerId], t: f64) {
         store.set_transform(layer_id, transform);
 
         // Pulse opacity.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "Opacity is intentionally narrowed from bounded [0, 1] f64 to f32 for layer API"
+        )]
         let opacity = (0.5 + 0.5 * (t * 1.5 + phase).sin()) as f32;
         store.set_opacity(layer_id, opacity);
     }
