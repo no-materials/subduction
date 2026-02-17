@@ -12,54 +12,54 @@ env:
   # List of packages that will be checked with the minimum supported Rust version.
   # This should be limited to packages that are intended for publishing.
   RUST_MIN_VER_PKGS: >-
-    -p subduction-core
-    -p subduction-render
-    -p subduction-sync-harness
-    -p subduction-backend-apple
-    -p subduction-backend-web
-    -p subduction-backend-windows
-    -p subduction-backend-android
-    -p subduction-backend-wayland
-    -p subduction-backend-x11
+    -p subduction_core
+    -p subduction_render
+    -p subduction_sync_harness
+    -p subduction_backend_apple
+    -p subduction_backend_web
+    -p subduction_backend_windows
+    -p subduction_backend_android
+    -p subduction_backend_wayland
+    -p subduction_backend_x11
   # List of packages that don't support `no_std`.
   RUST_STD_ONLY_PKGS: >-
-    --exclude subduction-backend-android
-    --exclude subduction-backend-apple
-    --exclude subduction-backend-wayland
-    --exclude subduction-backend-web
-    --exclude subduction-backend-windows
-    --exclude subduction-backend-x11
-    --exclude subduction-debug
-    --exclude macos-layers
-    --exclude macos-lotta-layers
-    --exclude macos-wgpu
-    --exclude web-layers
-    --exclude web-video
-    --exclude web-lotta-layers
-    --exclude trace-demo
+    --exclude subduction_backend_android
+    --exclude subduction_backend_apple
+    --exclude subduction_backend_wayland
+    --exclude subduction_backend_web
+    --exclude subduction_backend_windows
+    --exclude subduction_backend_x11
+    --exclude subduction_debug
+    --exclude macos_layers
+    --exclude macos_lotta_layers
+    --exclude macos_wgpu
+    --exclude web_layers
+    --exclude web_video
+    --exclude web_lotta_layers
+    --exclude trace_demo
   # List of packages that don't support wasip1.
   RUST_NO_WASIP1_PKGS: >-
-    --exclude subduction-backend-apple
-    --exclude subduction-backend-web
-    --exclude macos-layers
-    --exclude macos-lotta-layers
-    --exclude macos-wgpu
-    --exclude web-layers
-    --exclude web-video
-    --exclude web-lotta-layers
+    --exclude subduction_backend_apple
+    --exclude subduction_backend_web
+    --exclude macos_layers
+    --exclude macos_lotta_layers
+    --exclude macos_wgpu
+    --exclude web_layers
+    --exclude web_video
+    --exclude web_lotta_layers
   # List of packages that don't support wasm32.
   RUST_NO_WASM_PKGS: >-
-    --exclude subduction-backend-apple
-    --exclude macos-layers
-    --exclude macos-lotta-layers
-    --exclude macos-wgpu
-    --exclude trace-demo
+    --exclude subduction_backend_apple
+    --exclude macos_layers
+    --exclude macos_lotta_layers
+    --exclude macos_wgpu
+    --exclude trace_demo
   # List of packages that are macOS-only and must be excluded on non-macOS runners.
   RUST_MAC_ONLY_PKGS: >-
-    --exclude subduction-backend-apple
-    --exclude macos-layers
-    --exclude macos-lotta-layers
-    --exclude macos-wgpu
+    --exclude subduction_backend_apple
+    --exclude macos_layers
+    --exclude macos_lotta_layers
+    --exclude macos_wgpu
   # List of features that depend on the standard library and will be excluded from no_std checks.
   FEATURES_DEPENDING_ON_STD: "std,default"
 
