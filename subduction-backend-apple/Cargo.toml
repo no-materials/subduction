@@ -54,7 +54,9 @@ objc2-core-video = { version = "0.3", optional = true, default-features = false,
   "CVReturn",
   "CVHostTime",
 ] }
-dispatch2 = { version = "0.3", optional = true, default-features = false }
+dispatch2 = { version = "0.3", optional = true, default-features = false, features = [
+  "alloc",
+] }
 
 # appkit feature deps
 objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = [
