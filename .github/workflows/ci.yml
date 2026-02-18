@@ -205,27 +205,12 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo hack clippy ${{ env.RUST_STD_ONLY_PKGS }} --workspace --locked --optional-deps --each-feature --ignore-unknown-features --features std --tests --benches --examples -- -D warnings
 
-  clippy-stable-macos-examples:
-    name: cargo clippy (macOS examples)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: install stable toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_STABLE_VER }}
-          components: clippy
-
-      - name: restore cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.event_name != 'merge_group' }}
-
       - name: cargo clippy (macOS examples, default)
+        if: runner.os == 'macOS'
         run: cargo clippy ${{ env.RUST_MAC_EXAMPLE_PKGS }} --locked -- -D warnings
 
       - name: cargo clippy (macOS examples, cv-display-link)
+        if: runner.os == 'macOS'
         run: cargo clippy ${{ env.RUST_MAC_DISPLAY_LINK_EXAMPLE_PKGS }} --locked --no-default-features --features cv-display-link -- -D warnings
 
   clippy-stable-wasm:
