@@ -488,6 +488,10 @@ fn animate_transforms(store: &mut LayerStore, sub_ids: &[LayerId], t: f64) {
                 Transform3d::from_translation(x, y, 0.0) * Transform3d::from_rotation_z(rotation);
             store.set_transform(layer_id, transform);
 
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "Opacity is intentionally narrowed from bounded [0, 1] f64 to f32 for layer API"
+            )]
             let opacity = (0.5 + 0.5 * (t * 1.5 + phase).sin()) as f32;
             store.set_opacity(layer_id, opacity);
         }

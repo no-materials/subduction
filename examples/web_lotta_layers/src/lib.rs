@@ -49,8 +49,20 @@ const DEFAULT_LAYERS: usize = 1000;
 fn layer_color_css(index: usize) -> String {
     let hue = (index as f64 * 137.508) % 360.0;
     let [r, g, b] = lotta_layers_common::hsl_to_rgb(hue, 0.7, 0.6);
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "CSS color channels intentionally clamp to u8-like integer domain"
+    )]
     let ri = (r * 255.0) as u32;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "CSS color channels intentionally clamp to u8-like integer domain"
+    )]
     let gi = (g * 255.0) as u32;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "CSS color channels intentionally clamp to u8-like integer domain"
+    )]
     let bi = (b * 255.0) as u32;
     format!("rgba({ri},{gi},{bi},0.9)")
 }
@@ -70,7 +82,7 @@ struct AnimState {
 }
 
 /// Entry point — called automatically by `wasm_bindgen(start)`.
-#[wasm_bindgen(start)]
+#[cfg_attr(all(target_arch = "wasm32", not(test)), wasm_bindgen(start))]
 pub fn main() -> Result<(), JsValue> {
     let window = web_sys::window().expect("no global window");
     let document = window.document().expect("no document");

@@ -24,6 +24,10 @@
     allow(dead_code, reason = "this crate only runs in the browser")
 )]
 #![expect(unsafe_code, reason = "js_sys::Float32Array::view requires unsafe")]
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "demo code intentionally narrows canvas dimensions and shader uniforms"
+)]
 
 extern crate alloc;
 
@@ -170,7 +174,7 @@ struct AnimState {
 }
 
 /// Entry point — called automatically by `wasm_bindgen(start)`.
-#[wasm_bindgen(start)]
+#[cfg_attr(all(target_arch = "wasm32", not(test)), wasm_bindgen(start))]
 pub fn main() -> Result<(), JsValue> {
     let window = web_sys::window().expect("no global window");
     let document = window.document().expect("no document");

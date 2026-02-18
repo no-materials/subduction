@@ -8,8 +8,6 @@
 //! pulling in a full linear-algebra crate.
 
 use core::ops::Mul;
-#[cfg(not(feature = "std"))]
-use kurbo::common::FloatFuncs as _;
 
 /// A column-major 4×4 affine transform stored as `[[f64; 4]; 4]`.
 ///
@@ -101,7 +99,10 @@ impl Transform3d {
         #[cfg(feature = "std")]
         let (s, c) = radians.sin_cos();
         #[cfg(not(feature = "std"))]
-        let (s, c) = (radians.sin(), radians.cos());
+        let (s, c) = (
+            <f64 as kurbo::common::FloatFuncs>::sin(radians),
+            <f64 as kurbo::common::FloatFuncs>::cos(radians),
+        );
         Self {
             cols: [
                 [c, s, 0.0, 0.0],
