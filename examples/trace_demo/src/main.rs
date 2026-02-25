@@ -4,8 +4,8 @@
 //! Simulated frame loop that exercises the tracing and diagnostics pipeline.
 //!
 //! Runs 60 synthetic frames through the scheduler, recording events to both a
-//! [`PrettyPrintSink`](subduction_debug::pretty::PrettyPrintSink) and a
-//! [`RecorderSink`](subduction_debug::recorder::RecorderSink), then exports a
+//! [`PrettyPrintSink`] and a
+//! [`RecorderSink`], then exports a
 //! Chrome trace JSON file.
 
 use std::fs::File;
