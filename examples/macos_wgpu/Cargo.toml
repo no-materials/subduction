@@ -14,9 +14,9 @@ workspace = true
 [dependencies]
 subduction_core = { workspace = true }
 subduction_backend_apple = { path = "../../subduction_backend_apple" }
-wgpu = "24"
+wgpu = { workspace = true }
 pollster = "0.4"
-bytemuck = { version = "1", features = ["derive"] }
+bytemuck = { workspace = true }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = [
   "NSNotification",

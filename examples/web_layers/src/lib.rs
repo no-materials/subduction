@@ -304,13 +304,10 @@ async fn init_wgpu(canvas: &HtmlCanvasElement) -> WgpuState {
         .expect("no suitable GPU adapter");
 
     let (device, queue) = adapter
-        .request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("web-layers-wgpu"),
-                ..Default::default()
-            },
-            None,
-        )
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("web-layers-wgpu"),
+            ..Default::default()
+        })
         .await
         .expect("device creation failed");
 
@@ -570,6 +567,7 @@ fn render_wgpu(gpu: &WgpuState, t: f32) {
                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     store: wgpu::StoreOp::Store,
                 },
+                depth_slice: None,
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,

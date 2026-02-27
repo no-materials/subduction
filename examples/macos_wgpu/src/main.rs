@@ -611,7 +611,6 @@ fn setup_window(mtm: MainThreadMarker) {
             label: Some("subduction_wgpu"),
             ..Default::default()
         },
-        None,
     ))
     .expect("failed to create device");
 
@@ -832,6 +831,7 @@ fn on_tick(tick: FrameTick) {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                             store: wgpu::StoreOp::Store,
                         },
+                        depth_slice: None,
                     })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
