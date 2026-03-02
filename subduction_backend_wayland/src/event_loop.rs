@@ -58,7 +58,8 @@
 //! ## Simple blocking loop
 //!
 //! [`OwnedQueueMode::blocking_dispatch`] flushes and blocks in one call,
-//! which is the easiest way to pump events:
+//! which is the easiest way to pump events. After dispatch, drain queued
+//! ticks via [`OwnedQueueMode::poll_tick`]:
 //!
 //! ```rust,no_run
 //! use wayland_client::Connection;
@@ -68,10 +69,20 @@
 //! let mut mode = OwnedQueueMode::new(&connection);
 //! mode.bootstrap().unwrap();
 //!
+//! // Register a surface (created by the host/toolkit).
+//! // mode.state_mut().set_surface(surface).unwrap();
+//!
 //! loop {
+//!     // 1. Dispatch — delivers wl_callback.done → enqueues ticks.
 //!     mode.blocking_dispatch().unwrap();
-//!     let _caps = mode.capabilities();
-//!     // ... poll ticks, check capabilities ...
+//!
+//!     // 2. Poll — drain all queued ticks.
+//!     while let Some(_tick) = mode.poll_tick() {
+//!         // 3. Process — compute hints, build frame ...
+//!         // 4. attach buffer + damage ...
+//!         // 5. Commit — requests next callback, feedback, commits, flushes.
+//!         // let _id = mode.commit_frame().unwrap();
+//!     }
 //! }
 //! ```
 //!
@@ -131,11 +142,14 @@
 //!   flush on the host's behalf in this mode).
 //!
 //! ```rust,no_run
-//! use wayland_client::protocol::{wl_output, wl_registry};
+//! use wayland_client::protocol::{wl_callback, wl_output, wl_registry};
 //! use wayland_client::{Connection, EventQueue};
-//! use wayland_protocols::wp::presentation_time::client::wp_presentation;
+//! use wayland_protocols::wp::presentation_time::client::{
+//!     wp_presentation, wp_presentation_feedback,
+//! };
 //! use subduction_backend_wayland::{
-//!     EmbeddedStateMode, OutputGlobalData, WaylandProtocol, WaylandState,
+//!     EmbeddedStateMode, FeedbackData, FrameCallbackData, OutputGlobalData,
+//!     WaylandProtocol, WaylandState,
 //! };
 //!
 //! struct HostState {
@@ -155,6 +169,10 @@
 //!     [wl_output::WlOutput: OutputGlobalData] => WaylandProtocol);
 //! wayland_client::delegate_dispatch!(HostState:
 //!     [wp_presentation::WpPresentation: ()] => WaylandProtocol);
+//! wayland_client::delegate_dispatch!(HostState:
+//!     [wl_callback::WlCallback: FrameCallbackData] => WaylandProtocol);
+//! wayland_client::delegate_dispatch!(HostState:
+//!     [wp_presentation_feedback::WpPresentationFeedback: FeedbackData] => WaylandProtocol);
 //!
 //! let connection = Connection::connect_to_env().unwrap();
 //! let mut event_queue: EventQueue<HostState> = connection.new_event_queue();
@@ -172,22 +190,52 @@
 //! event_queue.roundtrip(&mut state).unwrap();
 //!
 //! loop {
+//!     // Dispatch — delivers protocol events including wl_callback.done.
 //!     event_queue.blocking_dispatch(&mut state).unwrap();
-//!     let _caps = state.wayland.capabilities();
-//!     // ... host dispatch logic ...
+//!
+//!     // Poll ticks enqueued by the callback handler.
+//!     while let Some(_tick) = state.wayland.poll_tick() {
+//!         // Process tick, compute hints, build frame ...
+//!         // attach buffer + damage ...
+//!         // Commit — requests next callback, feedback, commits, flushes.
+//!         // let _id = state.wayland.commit_frame(&qh, &connection).unwrap();
+//!     }
 //! }
 //! ```
 
+use crate::commit::{CommitFrameError, CommitState, FeedbackData};
 use crate::output_registry::OutputRegistry;
-use crate::protocol::{Capabilities, OutputGlobalData, WaylandProtocol};
+use crate::presentation::{PendingFeedback, PresentEvent, PresentEventQueue, SubmissionId};
+use crate::protocol::{Capabilities, FrameCallbackData, OutputGlobalData, WaylandProtocol};
+use crate::tick::TickerState;
 use crate::time::{Clock, now_for_clock};
+use std::collections::HashMap;
 use subduction_core::time::HostTime;
-use wayland_client::protocol::{wl_output, wl_registry};
+use subduction_core::timing::FrameTick;
+use wayland_client::protocol::{wl_callback, wl_output, wl_registry, wl_surface};
 use wayland_client::{
-    Connection, DispatchError, EventQueue, QueueHandle,
+    Connection, Dispatch, DispatchError, EventQueue, QueueHandle,
     backend::{ReadEventsGuard, WaylandError},
 };
-use wayland_protocols::wp::presentation_time::client::wp_presentation;
+use wayland_protocols::wp::presentation_time::client::{wp_presentation, wp_presentation_feedback};
+
+/// Error returned by [`WaylandState::set_surface`] when a surface has already
+/// been registered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSurfaceError {
+    /// A surface has already been set; the single-surface contract allows only
+    /// one.
+    AlreadySet,
+}
+
+/// Error returned when requesting a frame callback is not possible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestFrameError {
+    /// No surface has been registered via [`WaylandState::set_surface`].
+    NoSurface,
+    /// A frame callback is already in flight.
+    AlreadyInFlight,
+}
 
 /// Backend-owned state for Wayland protocol handling.
 ///
@@ -202,7 +250,8 @@ use wayland_protocols::wp::presentation_time::client::wp_presentation;
 /// 2. Call [`WaylandState::set_registry`] to store the registry proxy.
 /// 3. Implement `AsMut<WaylandState>` on their host state.
 /// 4. Wire [`delegate_dispatch!`](wayland_client::delegate_dispatch) for
-///    `WlRegistry` and `WlOutput` via [`WaylandProtocol`].
+///    `WlRegistry`, `WlOutput`, `WpPresentation`, and `WlCallback` via
+///    [`WaylandProtocol`].
 /// 5. Drive dispatch and the initial roundtrip themselves.
 ///
 /// Embedded-mode hosts are responsible for flushing the connection after
@@ -216,12 +265,17 @@ pub struct WaylandState {
     pub(crate) clock: Clock,
     pub(crate) presentation: Option<wp_presentation::WpPresentation>,
     pub(crate) bootstrapped: bool,
+    pub(crate) ticker: TickerState,
+    pub(crate) commit: CommitState,
+    pub(crate) surface: Option<wl_surface::WlSurface>,
+    pub(crate) present_events: PresentEventQueue,
+    pub(crate) pending_feedback: HashMap<SubmissionId, PendingFeedback>,
 }
 
 impl WaylandState {
     /// Creates a new empty backend state.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             registry: None,
             output_registry: OutputRegistry::new(),
@@ -229,6 +283,11 @@ impl WaylandState {
             clock: Clock::Monotonic,
             presentation: None,
             bootstrapped: false,
+            ticker: TickerState::new(),
+            commit: CommitState::new(),
+            surface: None,
+            present_events: PresentEventQueue::default(),
+            pending_feedback: HashMap::new(),
         }
     }
 
@@ -246,15 +305,123 @@ impl WaylandState {
         self.registry = Some(registry);
     }
 
+    /// Registers the surface that the backend will pace with frame callbacks.
+    ///
+    /// This is a one-shot operation enforcing the single-surface v1 contract.
+    /// Returns [`SetSurfaceError::AlreadySet`] if called more than once.
+    pub fn set_surface(&mut self, surface: wl_surface::WlSurface) -> Result<(), SetSurfaceError> {
+        if self.surface.is_some() {
+            return Err(SetSurfaceError::AlreadySet);
+        }
+        self.surface = Some(surface);
+        Ok(())
+    }
+
+    /// Pops the next queued [`FrameTick`], if any.
+    #[must_use]
+    pub fn poll_tick(&mut self) -> Option<FrameTick> {
+        self.ticker.poll_tick()
+    }
+
+    /// Pops the next queued [`PresentEvent`], if any.
+    #[must_use]
+    pub fn poll_present_event(&mut self) -> Option<PresentEvent> {
+        self.present_events.pop()
+    }
+
+    /// Requests the next frame callback from the compositor.
+    ///
+    /// Sends a `wl_surface.frame()` request with backend-specific userdata,
+    /// marking one callback as in-flight. Returns
+    /// [`RequestFrameError::NoSurface`] if no surface has been registered, or
+    /// [`RequestFrameError::AlreadyInFlight`] if a callback is already pending.
+    ///
+    /// # Flush requirement
+    ///
+    /// This method emits a protocol request but does **not** flush the
+    /// connection. In owned mode, the next
+    /// [`blocking_dispatch`](OwnedQueueMode::blocking_dispatch) flushes
+    /// automatically. In non-blocking or embedded mode, the caller must flush.
+    pub fn request_frame<D>(&mut self, qh: &QueueHandle<D>) -> Result<(), RequestFrameError>
+    where
+        D: Dispatch<wl_callback::WlCallback, FrameCallbackData> + AsMut<Self> + 'static,
+    {
+        let surface = self.surface.as_ref().ok_or(RequestFrameError::NoSurface)?;
+        if self.ticker.is_callback_in_flight() {
+            return Err(RequestFrameError::AlreadyInFlight);
+        }
+        let _callback = surface.frame(qh, FrameCallbackData);
+        self.ticker.mark_callback_requested();
+        Ok(())
+    }
+
+    /// Sequences a frame callback request, presentation feedback request,
+    /// surface commit, and connection flush in the correct protocol order.
+    ///
+    /// Returns the [`SubmissionId`] assigned to this commit, which can be
+    /// correlated with future [`PresentEvent`]s.
+    ///
+    /// # Flush
+    ///
+    /// This method always flushes the connection after committing. If flush
+    /// fails, the surface commit was buffered but may not have reached the
+    /// compositor; the caller should treat this as a transport error.
+    ///
+    /// # Presentation feedback
+    ///
+    /// When `wp_presentation` is available and the pending feedback count is
+    /// below the internal limit, `commit_frame` requests presentation feedback
+    /// for this commit. If the limit is reached, feedback is silently skipped
+    /// — the commit and frame callback request still proceed.
+    pub fn commit_frame<D>(
+        &mut self,
+        qh: &QueueHandle<D>,
+        conn: &Connection,
+    ) -> Result<SubmissionId, CommitFrameError>
+    where
+        D: Dispatch<wl_callback::WlCallback, FrameCallbackData>
+            + Dispatch<wp_presentation_feedback::WpPresentationFeedback, FeedbackData>
+            + AsMut<Self>
+            + 'static,
+    {
+        // Clone proxies to avoid borrow conflicts with self.ticker / self.commit.
+        let surface = self.surface.clone().ok_or(CommitFrameError::NoSurface)?;
+        let presentation = self.presentation.clone();
+
+        // 1. Request next frame callback (best-effort; skip if already in flight).
+        if !self.ticker.is_callback_in_flight() {
+            let _cb = surface.frame(qh, FrameCallbackData);
+            self.ticker.mark_callback_requested();
+        }
+
+        // 2. Allocate submission ID.
+        let id = self.commit.allocate_id();
+
+        // 3. Request presentation feedback if available and under limit.
+        if let Some(pres) = presentation
+            && !self.commit.is_at_limit()
+        {
+            let _fb = pres.feedback(&surface, qh, FeedbackData { submission_id: id });
+            self.commit.increment_pending();
+            self.pending_feedback
+                .insert(id, PendingFeedback { sync_output: None });
+        }
+
+        // 4. Commit the surface.
+        surface.commit();
+
+        // 5. Flush.
+        conn.flush().map_err(CommitFrameError::Flush)?;
+
+        Ok(id)
+    }
+
     /// Returns current host time using the selected backend clock.
     ///
     /// After `wp_presentation.clock_id` has been received, this reads the
     /// compositor-aligned clock. Before that, it falls back to
     /// `CLOCK_MONOTONIC`.
-    #[allow(
-        dead_code,
-        reason = "will be used by ticker/presenter in future implementation"
-    )]
+    #[allow(dead_code, reason = "called from future wl_callback dispatch handler")]
     #[must_use]
     pub(crate) fn now(&self) -> HostTime {
         now_for_clock(self.clock)
@@ -276,6 +443,8 @@ impl AsMut<Self> for WaylandState {
 wayland_client::delegate_dispatch!(WaylandState: [wl_registry::WlRegistry: ()] => WaylandProtocol);
 wayland_client::delegate_dispatch!(WaylandState: [wl_output::WlOutput: OutputGlobalData] => WaylandProtocol);
 wayland_client::delegate_dispatch!(WaylandState: [wp_presentation::WpPresentation: ()] => WaylandProtocol);
+wayland_client::delegate_dispatch!(WaylandState: [wl_callback::WlCallback: FrameCallbackData] => WaylandProtocol);
+wayland_client::delegate_dispatch!(WaylandState: [wp_presentation_feedback::WpPresentationFeedback: FeedbackData] => WaylandProtocol);
 
 /// Owned-queue integration mode.
 ///
@@ -380,6 +549,43 @@ impl OwnedQueueMode {
     pub fn state_mut(&mut self) -> &mut WaylandState {
         &mut self.state
     }
+
+    /// Requests the next frame callback from the compositor.
+    ///
+    /// Convenience wrapper that calls [`WaylandState::request_frame`] with the
+    /// owned queue handle. Does **not** flush — the next
+    /// [`blocking_dispatch`](Self::blocking_dispatch) flushes automatically, or
+    /// call [`flush`](Self::flush) explicitly.
+    pub fn request_frame(&mut self) -> Result<(), RequestFrameError> {
+        let qh = self.event_queue.handle();
+        self.state.request_frame(&qh)
+    }
+
+    /// Sequences a frame callback request, presentation feedback request,
+    /// surface commit, and connection flush.
+    ///
+    /// Convenience wrapper that calls [`WaylandState::commit_frame`] with
+    /// the owned queue handle and stored connection.
+    pub fn commit_frame(&mut self) -> Result<SubmissionId, CommitFrameError> {
+        let qh = self.event_queue.handle();
+        self.state.commit_frame(&qh, &self.connection)
+    }
+
+    /// Pops the next queued [`FrameTick`], if any.
+    ///
+    /// Convenience wrapper that calls [`WaylandState::poll_tick`].
+    #[must_use]
+    pub fn poll_tick(&mut self) -> Option<FrameTick> {
+        self.state.poll_tick()
+    }
+
+    /// Pops the next queued [`PresentEvent`], if any.
+    ///
+    /// Convenience wrapper that calls [`WaylandState::poll_present_event`].
+    #[must_use]
+    pub fn poll_present_event(&mut self) -> Option<PresentEvent> {
+        self.state.poll_present_event()
+    }
 }
 
 /// Embedded-state integration mode.
@@ -404,5 +610,384 @@ impl<HostState> EmbeddedStateMode<HostState> {
     #[must_use]
     pub fn queue_handle(&self) -> QueueHandle<HostState> {
         self.queue_handle.clone()
+    }
+}
+
+#[cfg(test)]
+impl WaylandState {
+    /// Test helper: simulates the `sync_output` event from the dispatch handler.
+    ///
+    /// Takes a pre-resolved `Option<OutputId>` (bypassing proxy lookup).
+    fn test_on_sync_output(
+        &mut self,
+        id: SubmissionId,
+        resolved: Option<subduction_core::output::OutputId>,
+    ) {
+        if let Some(pending) = self.pending_feedback.get_mut(&id)
+            && (resolved.is_some() || pending.sync_output.is_none())
+        {
+            pending.sync_output = resolved;
+        }
+    }
+
+    /// Test helper: simulates the `presented` terminal event from the dispatch handler.
+    fn test_on_presented(
+        &mut self,
+        id: SubmissionId,
+        actual_present: HostTime,
+        refresh_interval: Option<u64>,
+        flags: u32,
+    ) {
+        let output = self
+            .pending_feedback
+            .remove(&id)
+            .and_then(|p| p.sync_output);
+        self.present_events.push(PresentEvent::Presented {
+            id,
+            actual_present,
+            refresh_interval,
+            output,
+            flags,
+        });
+        self.ticker.set_last_observed_actual_present(actual_present);
+        self.commit.decrement_pending();
+    }
+
+    /// Test helper: simulates the `discarded` terminal event from the dispatch handler.
+    fn test_on_discarded(&mut self, id: SubmissionId) {
+        let _ = self.pending_feedback.remove(&id);
+        self.present_events.push(PresentEvent::Discarded { id });
+        self.commit.decrement_pending();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use subduction_core::output::OutputId;
+    use wayland_client::Proxy;
+    use wayland_client::backend::ObjectId;
+
+    fn test_queue_handle() -> (EventQueue<WaylandState>, QueueHandle<WaylandState>) {
+        let (s1, _s2) = std::os::unix::net::UnixStream::pair().unwrap();
+        let conn = Connection::from_socket(s1).unwrap();
+        let eq: EventQueue<WaylandState> = conn.new_event_queue();
+        let qh = eq.handle();
+        (eq, qh)
+    }
+
+    fn inert_surface() -> wl_surface::WlSurface {
+        let (s1, _s2) = std::os::unix::net::UnixStream::pair().unwrap();
+        let conn = Connection::from_socket(s1).unwrap();
+        wl_surface::WlSurface::from_id(&conn, ObjectId::null()).unwrap()
+    }
+
+    #[test]
+    fn request_frame_without_surface_returns_error() {
+        let (_eq, qh) = test_queue_handle();
+        let mut state = WaylandState::new();
+        assert_eq!(state.request_frame(&qh), Err(RequestFrameError::NoSurface),);
+    }
+
+    #[test]
+    fn request_frame_when_in_flight_returns_already_in_flight() {
+        let (_eq, qh) = test_queue_handle();
+        let mut state = WaylandState::new();
+        state.set_surface(inert_surface()).unwrap();
+        state.ticker.mark_callback_requested();
+        assert_eq!(
+            state.request_frame(&qh),
+            Err(RequestFrameError::AlreadyInFlight),
+        );
+    }
+
+    fn test_connection_and_queue() -> (
+        Connection,
+        EventQueue<WaylandState>,
+        QueueHandle<WaylandState>,
+    ) {
+        let (s1, _s2) = std::os::unix::net::UnixStream::pair().unwrap();
+        let conn = Connection::from_socket(s1).unwrap();
+        let eq: EventQueue<WaylandState> = conn.new_event_queue();
+        let qh = eq.handle();
+        (conn, eq, qh)
+    }
+
+    #[test]
+    fn commit_frame_without_surface_returns_no_surface() {
+        let (conn, _eq, qh) = test_connection_and_queue();
+        let mut state = WaylandState::new();
+        let result = state.commit_frame(&qh, &conn);
+        assert!(matches!(result, Err(CommitFrameError::NoSurface)));
+    }
+
+    #[test]
+    fn commit_frame_with_inert_surface_returns_submission_id() {
+        let (conn, _eq, qh) = test_connection_and_queue();
+        let mut state = WaylandState::new();
+        state.set_surface(inert_surface()).unwrap();
+        let id = state.commit_frame(&qh, &conn).unwrap();
+        assert_eq!(id, SubmissionId(0));
+    }
+
+    #[test]
+    fn successive_commit_frames_produce_monotonic_ids() {
+        let (conn, _eq, qh) = test_connection_and_queue();
+        let mut state = WaylandState::new();
+        state.set_surface(inert_surface()).unwrap();
+
+        let id0 = state.commit_frame(&qh, &conn).unwrap();
+        // Clear in-flight so next commit_frame can request a new callback.
+        let empty_reg = OutputRegistry::new();
+        state.ticker.on_callback_done(state.clock, &empty_reg);
+
+        let id1 = state.commit_frame(&qh, &conn).unwrap();
+        assert!(id1 > id0);
+    }
+
+    #[test]
+    fn commit_frame_marks_callback_in_flight() {
+        let (conn, _eq, qh) = test_connection_and_queue();
+        let mut state = WaylandState::new();
+        state.set_surface(inert_surface()).unwrap();
+
+        assert!(!state.ticker.is_callback_in_flight());
+        let _id = state.commit_frame(&qh, &conn).unwrap();
+        assert!(state.ticker.is_callback_in_flight());
+    }
+
+    #[test]
+    fn commit_frame_skips_callback_when_already_in_flight() {
+        let (conn, _eq, qh) = test_connection_and_queue();
+        let mut state = WaylandState::new();
+        state.set_surface(inert_surface()).unwrap();
+
+        // First commit requests a callback.
+        let _id0 = state.commit_frame(&qh, &conn).unwrap();
+        assert!(state.ticker.is_callback_in_flight());
+
+        // Second commit skips the callback request (no error).
+        let _id1 = state.commit_frame(&qh, &conn).unwrap();
+        assert!(state.ticker.is_callback_in_flight());
+    }
+
+    // --- Presentation feedback integration tests ---
+
+    /// Helper: sets up a `WaylandState` with a pending feedback entry.
+    fn state_with_pending(id: SubmissionId) -> WaylandState {
+        let mut state = WaylandState::new();
+        state
+            .pending_feedback
+            .insert(id, PendingFeedback { sync_output: None });
+        state.commit.increment_pending();
+        state
+    }
+
+    #[test]
+    fn flags_extraction_wenum_value() {
+        use wayland_protocols::wp::presentation_time::client::wp_presentation_feedback::Kind;
+        // Kind is bitflags: Vsync = 0x1, HwClock = 0x2.
+        let combined = Kind::Vsync | Kind::HwClock;
+        assert_eq!(combined.bits(), 0x3);
+    }
+
+    #[test]
+    fn flags_extraction_wenum_unknown() {
+        use wayland_client::WEnum;
+        use wayland_protocols::wp::presentation_time::client::wp_presentation_feedback::Kind;
+        let raw: u32 = match WEnum::<Kind>::Unknown(0xFF) {
+            WEnum::Value(k) => k.bits(),
+            WEnum::Unknown(v) => v,
+        };
+        assert_eq!(raw, 0xFF);
+    }
+
+    #[test]
+    fn discard_enqueues_event_and_decrements_pending() {
+        let id = SubmissionId(0);
+        let mut state = state_with_pending(id);
+        assert_eq!(state.commit.pending_count(), 1);
+
+        state.test_on_discarded(id);
+
+        assert_eq!(
+            state.poll_present_event(),
+            Some(PresentEvent::Discarded { id })
+        );
+        assert_eq!(state.commit.pending_count(), 0);
+        assert!(state.pending_feedback.is_empty());
+    }
+
+    #[test]
+    fn out_of_order_delivery() {
+        let id0 = SubmissionId(0);
+        let id1 = SubmissionId(1);
+        let mut state = WaylandState::new();
+        // Insert both pending entries.
+        state
+            .pending_feedback
+            .insert(id0, PendingFeedback { sync_output: None });
+        state.commit.increment_pending();
+        state
+            .pending_feedback
+            .insert(id1, PendingFeedback { sync_output: None });
+        state.commit.increment_pending();
+
+        // Feedback for id1 arrives first.
+        state.test_on_presented(id1, HostTime(200), Some(16_666_667), 0);
+        // Then id0.
+        state.test_on_presented(id0, HostTime(100), Some(16_666_667), 0);
+
+        let ev1 = state.poll_present_event().unwrap();
+        let ev0 = state.poll_present_event().unwrap();
+        assert!(matches!(ev1, PresentEvent::Presented { id, .. } if id == id1));
+        assert!(matches!(ev0, PresentEvent::Presented { id, .. } if id == id0));
+        assert_eq!(state.commit.pending_count(), 0);
+    }
+
+    #[test]
+    fn sync_output_present_resolves_output() {
+        let id = SubmissionId(0);
+        let mut state = state_with_pending(id);
+        let output = OutputId(7);
+
+        state.test_on_sync_output(id, Some(output));
+        state.test_on_presented(id, HostTime(1000), None, 0);
+
+        let ev = state.poll_present_event().unwrap();
+        assert!(matches!(
+            ev,
+            PresentEvent::Presented { output: Some(o), .. } if o == output
+        ));
+    }
+
+    #[test]
+    fn sync_output_unknown_produces_none() {
+        let id = SubmissionId(0);
+        let mut state = state_with_pending(id);
+
+        // sync_output with a proxy not in the registry → None.
+        state.test_on_sync_output(id, None);
+        state.test_on_presented(id, HostTime(1000), None, 0);
+
+        let ev = state.poll_present_event().unwrap();
+        assert!(matches!(ev, PresentEvent::Presented { output: None, .. }));
+    }
+
+    #[test]
+    fn sync_output_missing_entirely() {
+        let id = SubmissionId(0);
+        let mut state = state_with_pending(id);
+
+        // No sync_output before presented → output: None.
+        state.test_on_presented(id, HostTime(1000), None, 0);
+
+        let ev = state.poll_present_event().unwrap();
+        assert!(matches!(ev, PresentEvent::Presented { output: None, .. }));
+    }
+
+    #[test]
+    fn known_beats_unknown_sync_output_policy() {
+        let id = SubmissionId(0);
+        let mut state = state_with_pending(id);
+        let known = OutputId(3);
+
+        // First: known output arrives.
+        state.test_on_sync_output(id, Some(known));
+        // Second: unknown output arrives — should NOT overwrite.
+        state.test_on_sync_output(id, None);
+
+        state.test_on_presented(id, HostTime(1000), None, 0);
+
+        let ev = state.poll_present_event().unwrap();
+        assert!(matches!(
+            ev,
+            PresentEvent::Presented { output: Some(o), .. } if o == known
+        ));
+    }
+
+    #[test]
+    fn last_observed_actual_present_updated() {
+        let id = SubmissionId(0);
+        let mut state = state_with_pending(id);
+
+        state.test_on_presented(id, HostTime(42_000), None, 0);
+
+        // The ticker should have the actual present time stored.
+        // Verify by generating a tick and checking prev_actual_present.
+        let reg = OutputRegistry::new();
+        state.ticker.mark_callback_requested();
+        state.ticker.on_callback_done(state.clock, &reg);
+        let tick = state.ticker.poll_tick().unwrap();
+        assert_eq!(tick.prev_actual_present, Some(HostTime(42_000)));
+    }
+
+    #[test]
+    fn terminal_event_for_missing_submission_presented() {
+        let mut state = WaylandState::new();
+        let id = SubmissionId(99);
+        // Simulate increment that happened at creation time.
+        state.commit.increment_pending();
+
+        // Presented for an id not in the pending map — no panic, event
+        // still emitted, pending count still decrements.
+        state.test_on_presented(id, HostTime(500), None, 0);
+
+        let ev = state.poll_present_event().unwrap();
+        assert!(matches!(
+            ev,
+            PresentEvent::Presented { id: sid, output: None, .. } if sid == id
+        ));
+        assert_eq!(state.commit.pending_count(), 0);
+    }
+
+    #[test]
+    fn terminal_event_for_missing_submission_discarded() {
+        let mut state = WaylandState::new();
+        let id = SubmissionId(99);
+        state.commit.increment_pending();
+
+        state.test_on_discarded(id);
+
+        let ev = state.poll_present_event().unwrap();
+        assert_eq!(ev, PresentEvent::Discarded { id });
+        assert_eq!(state.commit.pending_count(), 0);
+    }
+
+    #[test]
+    fn pending_map_counter_coherence() {
+        let mut state = WaylandState::new();
+
+        // Normal flow: insert two pending entries.
+        let id0 = SubmissionId(0);
+        let id1 = SubmissionId(1);
+        state
+            .pending_feedback
+            .insert(id0, PendingFeedback { sync_output: None });
+        state.commit.increment_pending();
+        state
+            .pending_feedback
+            .insert(id1, PendingFeedback { sync_output: None });
+        state.commit.increment_pending();
+        assert_eq!(
+            state.pending_feedback.len(),
+            state.commit.pending_count() as usize
+        );
+
+        // Discard one.
+        state.test_on_discarded(id0);
+        assert_eq!(
+            state.pending_feedback.len(),
+            state.commit.pending_count() as usize
+        );
+
+        // Present the other.
+        state.test_on_presented(id1, HostTime(100), None, 0);
+        assert_eq!(
+            state.pending_feedback.len(),
+            state.commit.pending_count() as usize
+        );
+        assert_eq!(state.pending_feedback.len(), 0);
+        assert_eq!(state.commit.pending_count(), 0);
     }
 }

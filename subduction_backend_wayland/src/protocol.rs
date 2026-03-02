@@ -18,12 +18,14 @@
 //! HostState                      (embedded mode, same delegation)
 //! ```
 
+use crate::commit::FeedbackData;
 use crate::event_loop::WaylandState;
+use crate::presentation::{PresentEvent, presentation_time_to_host_time};
 use crate::time::clock_from_presentation_clk_id;
 use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::protocol::{wl_output, wl_registry};
-use wayland_client::{Dispatch, Proxy};
-use wayland_protocols::wp::presentation_time::client::wp_presentation;
+use wayland_client::protocol::{wl_callback, wl_output, wl_registry};
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
+use wayland_protocols::wp::presentation_time::client::{wp_presentation, wp_presentation_feedback};
 
 /// Maximum `wl_output` version the backend will bind.
 pub(crate) const WL_OUTPUT_MAX_VERSION: u32 = 4;
@@ -71,6 +73,14 @@ pub struct OutputGlobalData {
     pub(crate) global_name: u32,
 }
 
+/// Userdata marker for backend-issued frame callbacks.
+///
+/// Distinguishes backend callbacks from host/toolkit callbacks on the same
+/// queue. Public because embedded-mode hosts need it in
+/// [`delegate_dispatch!`](wayland_client::delegate_dispatch).
+#[derive(Debug, Clone, Copy)]
+pub struct FrameCallbackData;
+
 /// Delegation target for Wayland protocol event dispatch.
 ///
 /// Use with [`delegate_dispatch!`](wayland_client::delegate_dispatch) to wire
@@ -96,8 +106,8 @@ where
         registry: &WlRegistry,
         event: wl_registry::Event,
         _data: &(),
-        _conn: &wayland_client::Connection,
-        qh: &wayland_client::QueueHandle<D>,
+        _conn: &Connection,
+        qh: &QueueHandle<D>,
     ) {
         let ws: &mut WaylandState = state.as_mut();
         match event {
@@ -150,8 +160,8 @@ where
         _proxy: &wl_output::WlOutput,
         _event: wl_output::Event,
         _data: &OutputGlobalData,
-        _conn: &wayland_client::Connection,
-        _qh: &wayland_client::QueueHandle<D>,
+        _conn: &Connection,
+        _qh: &QueueHandle<D>,
     ) {
         // No-op. Output property events handled in a future commit.
     }
@@ -170,8 +180,8 @@ where
         _proxy: &wp_presentation::WpPresentation,
         event: wp_presentation::Event,
         _data: &(),
-        _conn: &wayland_client::Connection,
-        _qh: &wayland_client::QueueHandle<D>,
+        _conn: &Connection,
+        _qh: &QueueHandle<D>,
     ) {
         let ws: &mut WaylandState = state.as_mut();
         if let wp_presentation::Event::ClockId { clk_id } = event {
@@ -181,6 +191,103 @@ where
             } else {
                 ws.capabilities.presentation_clock_domain_aligned = false;
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch<WlCallback, FrameCallbackData, D>
+// ---------------------------------------------------------------------------
+
+impl<D> Dispatch<wl_callback::WlCallback, FrameCallbackData, D> for WaylandProtocol
+where
+    D: Dispatch<wl_callback::WlCallback, FrameCallbackData> + AsMut<WaylandState> + 'static,
+{
+    fn event(
+        state: &mut D,
+        _proxy: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        _data: &FrameCallbackData,
+        _conn: &Connection,
+        _qh: &QueueHandle<D>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            let ws: &mut WaylandState = state.as_mut();
+            ws.ticker.on_callback_done(ws.clock, &ws.output_registry);
+        }
+        // The callback_data field is a millisecond timestamp from an
+        // unspecified epoch — not safely comparable to HostTime or
+        // presentation feedback timestamps. We use Clock::now() instead.
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch<WpPresentationFeedback, FeedbackData, D>
+// ---------------------------------------------------------------------------
+
+impl<D> Dispatch<wp_presentation_feedback::WpPresentationFeedback, FeedbackData, D>
+    for WaylandProtocol
+where
+    D: Dispatch<wp_presentation_feedback::WpPresentationFeedback, FeedbackData>
+        + AsMut<WaylandState>
+        + 'static,
+{
+    fn event(
+        state: &mut D,
+        _proxy: &wp_presentation_feedback::WpPresentationFeedback,
+        event: wp_presentation_feedback::Event,
+        data: &FeedbackData,
+        _conn: &Connection,
+        _qh: &QueueHandle<D>,
+    ) {
+        let ws: &mut WaylandState = state.as_mut();
+        let id = data.submission_id;
+        match event {
+            wp_presentation_feedback::Event::SyncOutput { output } => {
+                let resolved = ws.output_registry.id_for_proxy(&output);
+                if let Some(pending) = ws.pending_feedback.get_mut(&id) {
+                    // "Known beats unknown": only overwrite if the new lookup
+                    // resolves to Some, or if no value was stored yet.
+                    if resolved.is_some() || pending.sync_output.is_none() {
+                        pending.sync_output = resolved;
+                    }
+                }
+            }
+            wp_presentation_feedback::Event::Presented {
+                tv_sec_hi,
+                tv_sec_lo,
+                tv_nsec,
+                refresh,
+                flags,
+                ..
+            } => {
+                let actual_present = presentation_time_to_host_time(tv_sec_hi, tv_sec_lo, tv_nsec);
+                let refresh_interval = if refresh == 0 {
+                    None
+                } else {
+                    Some(u64::from(refresh))
+                };
+                let raw_flags = match flags {
+                    WEnum::Value(k) => k.bits(),
+                    WEnum::Unknown(v) => v,
+                };
+                let output = ws.pending_feedback.remove(&id).and_then(|p| p.sync_output);
+                ws.present_events.push(PresentEvent::Presented {
+                    id,
+                    actual_present,
+                    refresh_interval,
+                    output,
+                    flags: raw_flags,
+                });
+                ws.ticker.set_last_observed_actual_present(actual_present);
+                ws.commit.decrement_pending();
+            }
+            wp_presentation_feedback::Event::Discarded => {
+                let _ = ws.pending_feedback.remove(&id);
+                ws.present_events.push(PresentEvent::Discarded { id });
+                ws.commit.decrement_pending();
+            }
+            _ => {} // Event enum is #[non_exhaustive]
         }
     }
 }

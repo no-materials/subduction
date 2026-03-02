@@ -4,6 +4,7 @@
 //! Internal output tracking for `wl_output` globals.
 
 use subduction_core::output::OutputId;
+use wayland_client::Proxy;
 use wayland_client::protocol::wl_output;
 
 /// A tracked `wl_output` global.
@@ -76,6 +77,16 @@ impl OutputRegistry {
         Some(self.entries.swap_remove(pos))
     }
 
+    /// Looks up the stable [`OutputId`] for a `wl_output` proxy by comparing
+    /// `Proxy::id()` values.
+    pub(crate) fn id_for_proxy(&self, proxy: &wl_output::WlOutput) -> Option<OutputId> {
+        let target = proxy.id();
+        self.entries
+            .iter()
+            .find(|e| e.proxy.id() == target)
+            .map(|e| e.id)
+    }
+
     /// Looks up the stable [`OutputId`] for a compositor global name.
     #[allow(dead_code, reason = "used by future output routing")]
     pub(crate) fn id_for_global(&self, global_name: u32) -> Option<OutputId> {
@@ -83,6 +94,16 @@ impl OutputRegistry {
             .iter()
             .find(|e| e.global_name == global_name)
             .map(|e| e.id)
+    }
+
+    /// Returns the lowest [`OutputId`] currently tracked, or `None` if the
+    /// registry is empty.
+    #[allow(
+        dead_code,
+        reason = "called by tick::select_tick_output in future dispatch path"
+    )]
+    pub(crate) fn lowest_id(&self) -> Option<OutputId> {
+        self.entries.iter().map(|e| e.id).min()
     }
 
     #[allow(dead_code, reason = "used in later integration work")]
@@ -193,6 +214,33 @@ mod tests {
         assert!(!reg.contains_global(2));
         reg.remove(1);
         assert!(!reg.contains_global(1));
+    }
+
+    #[test]
+    fn lowest_id_returns_min_after_adds() {
+        let mut reg = OutputRegistry::new();
+        reg.add(10, inert_output());
+        reg.add(11, inert_output());
+        reg.add(12, inert_output());
+        assert_eq!(reg.lowest_id(), Some(OutputId(0)));
+    }
+
+    #[test]
+    fn lowest_id_stable_after_swap_remove() {
+        let mut reg = OutputRegistry::new();
+        reg.add(10, inert_output()); // OutputId(0)
+        reg.add(11, inert_output()); // OutputId(1)
+        reg.add(12, inert_output()); // OutputId(2)
+
+        // Remove the lowest — swap_remove moves the last entry into position 0.
+        reg.remove(10);
+        assert_eq!(reg.lowest_id(), Some(OutputId(1)));
+    }
+
+    #[test]
+    fn lowest_id_returns_none_for_empty() {
+        let reg = OutputRegistry::new();
+        assert_eq!(reg.lowest_id(), None);
     }
 
     #[test]
