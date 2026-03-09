@@ -13,6 +13,8 @@ use crate::pipeline::CompositorPipeline;
 
 /// Minimum uniform buffer offset alignment required by wgpu.
 const UNIFORM_ALIGN: u64 = 256;
+/// Texture usages required by the presenter compositor itself.
+const REQUIRED_LAYER_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::TEXTURE_BINDING;
 
 /// Per-layer uniform data uploaded to the GPU.
 ///
@@ -60,6 +62,14 @@ struct UniformCache {
 /// Layer textures use **premultiplied alpha**. Apps should render premultiplied
 /// content into each layer's texture for correct blending.
 ///
+/// Presenter-owned layer textures are host render targets. By default,
+/// [`WgpuPresenter::new`] allocates them as `Rgba8Unorm` textures with
+/// [`wgpu::TextureUsages::TEXTURE_BINDING`],
+/// [`wgpu::TextureUsages::RENDER_ATTACHMENT`], and
+/// [`wgpu::TextureUsages::STORAGE_BINDING`] so renderers such as Vello can
+/// render into them directly even when the output surface uses a different
+/// format such as `Bgra8Unorm`.
+///
 /// # Usage
 ///
 /// ```rust,ignore
@@ -99,9 +109,81 @@ pub struct WgpuPresenter {
     output_size: (u32, u32),
     /// Texture format of the output surface.
     output_format: wgpu::TextureFormat,
+    /// Texture format of presenter-owned layer textures.
+    layer_format: wgpu::TextureFormat,
+    /// Texture usages of presenter-owned layer textures.
+    layer_usage: wgpu::TextureUsages,
 
     /// Persistent uniform buffer + bind group, grown as needed.
     uniform_cache: Option<UniformCache>,
+}
+
+/// Texture allocation policy for [`WgpuPresenter`].
+///
+/// This config controls the contract for presenter-owned layer textures:
+/// their size, format, and usage flags. The compositor output remains in
+/// `output_format`, which is typically the surface format.
+///
+/// # Migration note
+///
+/// Prior to this config, `WgpuPresenter` allocated layer textures with the
+/// same format as the output surface and only
+/// [`wgpu::TextureUsages::TEXTURE_BINDING`] plus
+/// [`wgpu::TextureUsages::RENDER_ATTACHMENT`]. The default is now
+/// `Rgba8Unorm` plus storage binding so compute-based renderers can write
+/// directly into presenter-owned layer textures.
+#[derive(Clone, Copy, Debug)]
+pub struct WgpuPresenterConfig {
+    /// Texture format of the composited output surface.
+    pub output_format: wgpu::TextureFormat,
+    /// `(width, height)` of the output surface in pixels.
+    pub output_size: (u32, u32),
+    /// Default `(width, height)` for newly allocated layer textures.
+    pub default_layer_size: (u32, u32),
+    /// Texture format of presenter-owned layer textures.
+    pub layer_format: wgpu::TextureFormat,
+    /// Texture usages of presenter-owned layer textures.
+    ///
+    /// The presenter always requires [`wgpu::TextureUsages::TEXTURE_BINDING`]
+    /// so it can sample these textures during composition.
+    pub layer_usage: wgpu::TextureUsages,
+}
+
+impl WgpuPresenterConfig {
+    /// Creates a presenter config with defaults suitable for host-rendered
+    /// layer textures.
+    pub fn new(
+        output_format: wgpu::TextureFormat,
+        output_size: (u32, u32),
+        default_layer_size: (u32, u32),
+    ) -> Self {
+        Self {
+            output_format,
+            output_size,
+            default_layer_size,
+            layer_format: wgpu::TextureFormat::Rgba8Unorm,
+            layer_usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::STORAGE_BINDING,
+        }
+    }
+
+    /// Overrides the layer texture format.
+    #[must_use]
+    pub fn with_layer_format(mut self, layer_format: wgpu::TextureFormat) -> Self {
+        self.layer_format = layer_format;
+        self
+    }
+
+    /// Overrides the layer texture usage flags.
+    ///
+    /// [`wgpu::TextureUsages::TEXTURE_BINDING`] is always added because the
+    /// presenter compositor samples each layer texture.
+    #[must_use]
+    pub fn with_layer_usage(mut self, layer_usage: wgpu::TextureUsages) -> Self {
+        self.layer_usage = layer_usage | REQUIRED_LAYER_USAGE;
+        self
+    }
 }
 
 impl WgpuPresenter {
@@ -111,6 +193,10 @@ impl WgpuPresenter {
     /// - `output_format`: the texture format of the composited output.
     /// - `output_size`: `(width, height)` of the output surface in pixels.
     /// - `default_layer_size`: default `(width, height)` for new layer textures.
+    ///
+    /// Layer textures default to `Rgba8Unorm` with texture binding, render
+    /// attachment, and storage binding. Use [`WgpuPresenter::new_with_config`]
+    /// or the builder methods on `Self` to override that contract.
     pub fn new(
         device: wgpu::Device,
         queue: wgpu::Queue,
@@ -118,7 +204,20 @@ impl WgpuPresenter {
         output_size: (u32, u32),
         default_layer_size: (u32, u32),
     ) -> Self {
-        let pipeline = CompositorPipeline::new(&device, output_format);
+        Self::new_with_config(
+            device,
+            queue,
+            WgpuPresenterConfig::new(output_format, output_size, default_layer_size),
+        )
+    }
+
+    /// Creates a new wgpu presenter with explicit layer texture policy.
+    pub fn new_with_config(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        config: WgpuPresenterConfig,
+    ) -> Self {
+        let pipeline = CompositorPipeline::new(&device, config.output_format);
 
         Self {
             device,
@@ -127,27 +226,65 @@ impl WgpuPresenter {
             layer_entries: HashMap::new(),
             surface_to_slot: HashMap::new(),
             slot_to_surface: HashMap::new(),
-            default_layer_size,
-            output_size,
-            output_format,
+            default_layer_size: config.default_layer_size,
+            output_size: config.output_size,
+            output_format: config.output_format,
+            layer_format: config.layer_format,
+            layer_usage: config.layer_usage | REQUIRED_LAYER_USAGE,
             uniform_cache: None,
         }
     }
 
+    /// Overrides the layer texture format for future allocations.
+    ///
+    /// This is intended for setup-time configuration before the first
+    /// [`Presenter::apply`] call.
+    #[must_use]
+    pub fn with_layer_format(mut self, layer_format: wgpu::TextureFormat) -> Self {
+        self.layer_format = layer_format;
+        self
+    }
+
+    /// Overrides the layer texture usage flags for future allocations.
+    ///
+    /// [`wgpu::TextureUsages::TEXTURE_BINDING`] is always preserved because
+    /// the presenter compositor samples each layer texture.
+    #[must_use]
+    pub fn with_layer_usage(mut self, layer_usage: wgpu::TextureUsages) -> Self {
+        self.layer_usage = layer_usage | REQUIRED_LAYER_USAGE;
+        self
+    }
+
     /// Returns the texture view for a [`SurfaceId`] so the app can render into it.
+    ///
+    /// The returned view uses [`WgpuPresenter::layer_format`] and the
+    /// corresponding texture was allocated with [`WgpuPresenter::layer_usage`].
     pub fn texture_for_surface(&self, surface_id: SurfaceId) -> Option<&wgpu::TextureView> {
         let slot = self.surface_to_slot.get(&surface_id.0)?;
         self.layer_entries.get(slot).map(|e| &e.view)
     }
 
     /// Returns the texture view for a raw slot index.
+    ///
+    /// The returned view uses [`WgpuPresenter::layer_format`] and the
+    /// corresponding texture was allocated with [`WgpuPresenter::layer_usage`].
     pub fn texture_for_slot(&self, idx: u32) -> Option<&wgpu::TextureView> {
         self.layer_entries.get(&idx).map(|e| &e.view)
     }
 
-    /// Returns the layer texture format (same as output format).
+    /// Returns the texture format used for presenter-owned layer textures.
     pub fn layer_format(&self) -> wgpu::TextureFormat {
+        self.layer_format
+    }
+
+    /// Returns the texture format used for the composited output surface.
+    pub fn output_format(&self) -> wgpu::TextureFormat {
         self.output_format
+    }
+
+    /// Returns the texture usage flags used for presenter-owned layer textures.
+    pub fn layer_usage(&self) -> wgpu::TextureUsages {
+        self.layer_usage
     }
 
     /// Updates the output surface size (call after reconfiguring the surface).
@@ -326,8 +463,8 @@ impl WgpuPresenter {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: self.output_format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: self.layer_format,
+            usage: self.layer_usage,
             view_formats: &[],
         });
 
@@ -532,6 +669,50 @@ fn clip_to_scissor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presenter_config_defaults_to_vello_compatible_layers() {
+        let config =
+            WgpuPresenterConfig::new(wgpu::TextureFormat::Bgra8Unorm, (800, 600), (256, 256));
+
+        assert_eq!(config.output_format, wgpu::TextureFormat::Bgra8Unorm);
+        assert_eq!(config.layer_format, wgpu::TextureFormat::Rgba8Unorm);
+        assert!(
+            config
+                .layer_usage
+                .contains(wgpu::TextureUsages::TEXTURE_BINDING)
+        );
+        assert!(
+            config
+                .layer_usage
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        );
+        assert!(
+            config
+                .layer_usage
+                .contains(wgpu::TextureUsages::STORAGE_BINDING)
+        );
+    }
+
+    #[test]
+    fn presenter_config_preserves_required_sampling_usage() {
+        let config =
+            WgpuPresenterConfig::new(wgpu::TextureFormat::Bgra8Unorm, (800, 600), (256, 256))
+                .with_layer_format(wgpu::TextureFormat::Bgra8Unorm)
+                .with_layer_usage(wgpu::TextureUsages::STORAGE_BINDING);
+
+        assert_eq!(config.layer_format, wgpu::TextureFormat::Bgra8Unorm);
+        assert!(
+            config
+                .layer_usage
+                .contains(wgpu::TextureUsages::TEXTURE_BINDING)
+        );
+        assert!(
+            config
+                .layer_usage
+                .contains(wgpu::TextureUsages::STORAGE_BINDING)
+        );
+    }
 
     #[test]
     fn ortho_maps_origin_to_top_left() {

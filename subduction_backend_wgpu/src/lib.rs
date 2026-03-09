@@ -7,6 +7,8 @@
 //! fallback that allocates a wgpu texture per layer, lets the app render
 //! content into each texture, and composites all visible layers (with
 //! transforms, opacity, and scissor clips) into a final output surface.
+//! The output surface format can differ from the format used for presenter-
+//! owned layer textures.
 //!
 //! See [`WgpuPresenter`] for usage.
 
@@ -14,4 +16,4 @@ mod pipeline;
 mod presenter;
 mod shader;
 
-pub use presenter::WgpuPresenter;
+pub use presenter::{WgpuPresenter, WgpuPresenterConfig};
