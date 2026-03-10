@@ -171,6 +171,26 @@ impl Default for Transform3d {
     }
 }
 
+impl From<kurbo::Affine> for Transform3d {
+    #[inline]
+    fn from(affine: kurbo::Affine) -> Self {
+        let [a, b, c, d, e, f] = affine.as_coeffs();
+        Self::from_cols(
+            [a, b, 0.0, 0.0],
+            [c, d, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [e, f, 0.0, 1.0],
+        )
+    }
+}
+
+impl From<kurbo::TranslateScale> for Transform3d {
+    #[inline]
+    fn from(ts: kurbo::TranslateScale) -> Self {
+        Self::from(kurbo::Affine::from(ts))
+    }
+}
+
 impl Mul for Transform3d {
     type Output = Self;
 
@@ -190,6 +210,21 @@ impl Mul for Transform3d {
             j += 1;
         }
         Self { cols: out }
+    }
+}
+
+impl Mul<[f64; 4]> for Transform3d {
+    type Output = [f64; 4];
+
+    #[inline]
+    fn mul(self, rhs: [f64; 4]) -> [f64; 4] {
+        let a = &self.cols;
+        [
+            a[0][0] * rhs[0] + a[1][0] * rhs[1] + a[2][0] * rhs[2] + a[3][0] * rhs[3],
+            a[0][1] * rhs[0] + a[1][1] * rhs[1] + a[2][1] * rhs[2] + a[3][1] * rhs[3],
+            a[0][2] * rhs[0] + a[1][2] * rhs[1] + a[2][2] * rhs[2] + a[3][2] * rhs[3],
+            a[0][3] * rhs[0] + a[1][3] * rhs[1] + a[2][3] * rhs[2] + a[3][3] * rhs[3],
+        ]
     }
 }
 
@@ -278,5 +313,63 @@ mod tests {
         t.cols[0][3] = f64::INFINITY;
         assert!(!t.is_finite());
         assert!(!t.is_nan());
+    }
+
+    #[test]
+    fn from_affine_embeds_xy_plane_transform() {
+        let affine = kurbo::Affine::new([2.0, 3.0, 5.0, 7.0, 11.0, 13.0]);
+        let transform = Transform3d::from(affine);
+
+        assert_eq!(
+            transform,
+            Transform3d::from_cols(
+                [2.0, 3.0, 0.0, 0.0],
+                [5.0, 7.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [11.0, 13.0, 0.0, 1.0],
+            )
+        );
+    }
+
+    #[test]
+    fn from_affine_maps_points_like_kurbo_affine() {
+        let affine = kurbo::Affine::new([2.0, 3.0, 5.0, 7.0, 11.0, 13.0]);
+        let point = kurbo::Point::new(17.0, 19.0);
+        let affine_point = affine * point;
+        let transform_point = Transform3d::from(affine) * [point.x, point.y, 0.0, 1.0];
+
+        assert_eq!(affine_point.x, transform_point[0]);
+        assert_eq!(affine_point.y, transform_point[1]);
+        assert_eq!(transform_point[2], 0.0);
+        assert_eq!(transform_point[3], 1.0);
+    }
+
+    #[test]
+    fn from_translate_scale_matches_affine_embedding() {
+        let ts = kurbo::TranslateScale::new(kurbo::Vec2::new(5.0, 6.0), 2.0);
+        let transform = Transform3d::from(ts);
+
+        assert_eq!(
+            transform,
+            Transform3d::from_cols(
+                [2.0, 0.0, 0.0, 0.0],
+                [0.0, 2.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [5.0, 6.0, 0.0, 1.0],
+            )
+        );
+    }
+
+    #[test]
+    fn from_translate_scale_maps_points_like_kurbo_translate_scale() {
+        let ts = kurbo::TranslateScale::new(kurbo::Vec2::new(5.0, 6.0), 2.0);
+        let point = kurbo::Point::new(17.0, 19.0);
+        let ts_point = ts * point;
+        let transform_point = Transform3d::from(ts) * [point.x, point.y, 0.0, 1.0];
+
+        assert_eq!(ts_point.x, transform_point[0]);
+        assert_eq!(ts_point.y, transform_point[1]);
+        assert_eq!(transform_point[2], 0.0);
+        assert_eq!(transform_point[3], 1.0);
     }
 }
