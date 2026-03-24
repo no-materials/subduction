@@ -420,6 +420,7 @@ impl WgpuPresenter {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             pass.set_pipeline(&self.pipeline.render_pipeline);
