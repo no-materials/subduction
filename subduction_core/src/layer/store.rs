@@ -6,7 +6,7 @@
 use alloc::vec::Vec;
 
 use invalidation::{CycleHandling, EagerPolicy, InvalidationTracker};
-use kurbo::Size;
+use kurbo::{Rect, Size};
 
 use crate::transform::Transform3d;
 
@@ -46,6 +46,7 @@ pub struct LayerStore {
     pub(crate) content: Vec<Option<SurfaceId>>,
     pub(crate) flags: Vec<LayerFlags>,
     pub(crate) bounds: Vec<Size>,
+    pub(crate) hit_rect: Vec<Option<Rect>>,
 
     // -- Computed properties (written by evaluate) --
     pub(crate) world_transform: Vec<Transform3d>,
@@ -90,6 +91,7 @@ impl LayerStore {
             content: Vec::new(),
             flags: Vec::new(),
             bounds: Vec::new(),
+            hit_rect: Vec::new(),
             world_transform: Vec::new(),
             effective_opacity: Vec::new(),
             effective_hidden: Vec::new(),
@@ -124,6 +126,7 @@ impl LayerStore {
             self.content[idx as usize] = None;
             self.flags[idx as usize] = LayerFlags::default();
             self.bounds[idx as usize] = Size::ZERO;
+            self.hit_rect[idx as usize] = None;
             self.world_transform[idx as usize] = Transform3d::IDENTITY;
             self.effective_opacity[idx as usize] = 1.0;
             self.effective_hidden[idx as usize] = false;
@@ -142,6 +145,7 @@ impl LayerStore {
             self.content.push(None);
             self.flags.push(LayerFlags::default());
             self.bounds.push(Size::ZERO);
+            self.hit_rect.push(None);
             self.world_transform.push(Transform3d::IDENTITY);
             self.effective_opacity.push(1.0);
             self.effective_hidden.push(false);
@@ -429,6 +433,17 @@ impl LayerStore {
         self.bounds[id.idx as usize]
     }
 
+    /// Returns the optional hit-test rect of a layer.
+    ///
+    /// When `Some`, [`hit_test`](Self::hit_test) checks containment against
+    /// this rect instead of the layer's full bounds. When `None` (the
+    /// default), the full bounds are used.
+    #[must_use]
+    pub fn hit_rect(&self, id: LayerId) -> Option<Rect> {
+        self.validate(id);
+        self.hit_rect[id.idx as usize]
+    }
+
     /// Returns the computed world transform of a layer.
     ///
     /// Only valid after [`evaluate`](Self::evaluate) has been called.
@@ -506,6 +521,18 @@ impl LayerStore {
         self.dirty.mark(id.idx, dirty::BOUNDS);
     }
 
+    /// Sets an optional hit-test rect for a layer (in local coordinates).
+    ///
+    /// When set, [`hit_test`](Self::hit_test) checks containment against this
+    /// rect instead of the full bounds. Use this when the layer's surface is
+    /// larger than its interactive area (e.g. to accommodate shadows or glow).
+    ///
+    /// No dirty channel is marked — hit testing is a read-only query.
+    pub fn set_hit_rect(&mut self, id: LayerId, hit_rect: Option<Rect>) {
+        self.validate(id);
+        self.hit_rect[id.idx as usize] = hit_rect;
+    }
+
     // -- Raw-index accessors for backends --
     //
     // These accept raw slot indices (as found in `FrameChanges`) rather than
@@ -525,6 +552,36 @@ impl LayerStore {
             self.len
         );
         self.world_transform[idx as usize]
+    }
+
+    /// Returns the local (non-inherited) transform at raw slot `idx`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx >= self.len`.
+    #[must_use]
+    pub fn local_transform_at(&self, idx: u32) -> Transform3d {
+        assert!(
+            idx < self.len,
+            "slot index {idx} out of range (len {})",
+            self.len
+        );
+        self.local_transform[idx as usize]
+    }
+
+    /// Returns the local (non-inherited) opacity at raw slot `idx`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx >= self.len`.
+    #[must_use]
+    pub fn local_opacity_at(&self, idx: u32) -> f32 {
+        assert!(
+            idx < self.len,
+            "slot index {idx} out of range (len {})",
+            self.len
+        );
+        self.local_opacity[idx as usize]
     }
 
     /// Returns the computed effective opacity at raw slot `idx`.
@@ -615,6 +672,38 @@ impl LayerStore {
             self.len
         );
         self.bounds[idx as usize]
+    }
+
+    /// Returns the hit-test rect at raw slot `idx`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx >= self.len`.
+    #[must_use]
+    pub fn hit_rect_at(&self, idx: u32) -> Option<Rect> {
+        assert!(
+            idx < self.len,
+            "slot index {idx} out of range (len {})",
+            self.len
+        );
+        self.hit_rect[idx as usize]
+    }
+
+    /// Returns the raw parent slot index at raw slot `idx`, or `None` if
+    /// the layer is a root (has no parent).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx >= self.len`.
+    #[must_use]
+    pub fn parent_at(&self, idx: u32) -> Option<u32> {
+        assert!(
+            idx < self.len,
+            "slot index {idx} out of range (len {})",
+            self.len
+        );
+        let p = self.parent[idx as usize];
+        if p == INVALID { None } else { Some(p) }
     }
 
     // -- Internal helpers --
@@ -843,10 +932,7 @@ mod tests {
         let id = store.create_layer();
         let _ = store.evaluate();
 
-        store.set_clip(
-            id,
-            Some(ClipShape::Rect(kurbo::Rect::new(0.0, 0.0, 100.0, 100.0))),
-        );
+        store.set_clip(id, Some(ClipShape::Rect(Rect::new(0.0, 0.0, 100.0, 100.0))));
         let changes = store.evaluate();
         assert!(
             changes.clips.contains(&id.idx),
@@ -907,5 +993,75 @@ mod tests {
             changes.bounds.contains(&id.idx),
             "bounds channel should contain the layer"
         );
+    }
+
+    #[test]
+    fn parent_at_root_is_none() {
+        let mut store = LayerStore::new();
+        let root = store.create_layer();
+        assert_eq!(store.parent_at(root.idx), None);
+    }
+
+    #[test]
+    fn parent_at_returns_parent_slot() {
+        let mut store = LayerStore::new();
+        let parent = store.create_layer();
+        let child = store.create_layer();
+        store.add_child(parent, child);
+        assert_eq!(store.parent_at(child.idx), Some(parent.idx));
+    }
+
+    #[test]
+    fn parent_at_reflects_reparent() {
+        let mut store = LayerStore::new();
+        let a = store.create_layer();
+        let b = store.create_layer();
+        let child = store.create_layer();
+        store.add_child(a, child);
+        assert_eq!(store.parent_at(child.idx), Some(a.idx));
+
+        store.reparent(child, b);
+        assert_eq!(store.parent_at(child.idx), Some(b.idx));
+    }
+
+    #[test]
+    fn parent_at_none_after_remove() {
+        let mut store = LayerStore::new();
+        let parent = store.create_layer();
+        let child = store.create_layer();
+        store.add_child(parent, child);
+        store.remove_from_parent(child);
+        assert_eq!(store.parent_at(child.idx), None);
+    }
+
+    #[test]
+    fn local_transform_at_default_is_identity() {
+        let mut store = LayerStore::new();
+        let id = store.create_layer();
+        assert_eq!(store.local_transform_at(id.idx), Transform3d::IDENTITY);
+    }
+
+    #[test]
+    fn local_transform_at_returns_set_value() {
+        let mut store = LayerStore::new();
+        let id = store.create_layer();
+        let xf = Transform3d::from_translation(7.0, 3.0, 0.0);
+        store.set_transform(id, xf);
+        assert_eq!(store.local_transform_at(id.idx), xf);
+    }
+
+    #[test]
+    fn local_opacity_at_default_is_one() {
+        let mut store = LayerStore::new();
+        let id = store.create_layer();
+        assert!((store.local_opacity_at(id.idx) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn local_opacity_at_returns_set_value() {
+        let mut store = LayerStore::new();
+        let id = store.create_layer();
+        store.set_opacity(id, 0.42);
+        assert!((store.local_opacity_at(id.idx) - 0.42).abs() < f32::EPSILON);
     }
 }
