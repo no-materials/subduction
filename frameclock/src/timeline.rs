@@ -42,7 +42,9 @@ impl AffineClock {
     /// factors.
     ///
     /// `initial_rate` is in media-seconds per host-tick (e.g. for nanosecond
-    /// ticks, this would be `1e-9`).
+    /// ticks, this would be `1e-9`). It is also the rate that
+    /// [`reset`](Self::reset) restores, so the value chosen here sets the
+    /// post-reset baseline.
     #[must_use]
     pub fn new(initial_rate: f64, rate_alpha: f64, offset_alpha: f64) -> Self {
         Self {
