@@ -106,8 +106,8 @@ fn seconds_per_tick(timebase: Timebase) -> f64 {
     f64::from(timebase.numer) / f64::from(timebase.denom) / 1e9
 }
 
-fn reanchor_media_clock(clock: &mut AffineClock, timebase: Timebase, host: HostTime, media: f64) {
-    *clock = AffineClock::new(seconds_per_tick(timebase), 0.08, 0.08);
+fn reanchor_media_clock(clock: &mut AffineClock, host: HostTime, media: f64) {
+    clock.reset();
     clock.update(host.ticks(), media);
 }
 
@@ -416,8 +416,7 @@ fn bind_controls(state: &Rc<RefCell<VideoState>>) -> Result<(), JsValue> {
             let next_time = dur * normalized;
             s.video.set_current_time(next_time);
             let host = subduction_backend_web::now();
-            let timebase = s.timebase;
-            reanchor_media_clock(&mut s.media_clock, timebase, host, next_time);
+            reanchor_media_clock(&mut s.media_clock, host, next_time);
         }
     }) as Box<dyn FnMut(_)>);
     state
@@ -432,13 +431,7 @@ fn bind_controls(state: &Rc<RefCell<VideoState>>) -> Result<(), JsValue> {
         let mut s = ended_state.borrow_mut();
         s.video.set_current_time(0.0);
         let _ = s.video.play();
-        let timebase = s.timebase;
-        reanchor_media_clock(
-            &mut s.media_clock,
-            timebase,
-            subduction_backend_web::now(),
-            0.0,
-        );
+        reanchor_media_clock(&mut s.media_clock, subduction_backend_web::now(), 0.0);
     }) as Box<dyn FnMut(_)>);
     state
         .borrow()
@@ -510,13 +503,7 @@ fn on_tick(state: &Rc<RefCell<VideoState>>, tick: FrameTick) {
     let has_duration = duration.is_finite() && duration > 0.0;
 
     if s.video.paused() {
-        let timebase = s.timebase;
-        reanchor_media_clock(
-            &mut s.media_clock,
-            timebase,
-            plan.sample_time,
-            observed_media,
-        );
+        reanchor_media_clock(&mut s.media_clock, plan.sample_time, observed_media);
     } else {
         s.media_clock
             .update(plan.sample_time.ticks(), observed_media);
